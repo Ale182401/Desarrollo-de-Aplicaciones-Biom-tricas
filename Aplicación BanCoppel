@@ -1,0 +1,151 @@
+package com.example.logainbancoppel09;
+
+// Librerías e importaciones necesarias para que la app funcione
+import android.content.Intent;
+import android.os.Build;
+import android.os.Bundle;
+import android.provider.Settings;
+import android.widget.ImageView;
+import android.widget.Toast;
+
+import androidx.activity.EdgeToEdge;
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.biometric.BiometricManager;
+import androidx.biometric.BiometricPrompt;
+import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+
+import java.util.concurrent.Executor;
+
+// Clase principal de la pantalla de inicio (MainActivity)
+public class MainActivity extends AppCompatActivity {
+
+    // Variables globales para manejar la ventana de lectura de huella digital
+    private BiometricPrompt biometricPrompt; // Administra la ventana emergente de la huella
+    private BiometricPrompt.PromptInfo promptInfo; // Guarda los textos (título, subtítulo y botón cancelar)
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        
+        // Permite que la pantalla se extienda hasta los bordes del teléfono (barra de estado y navegación)
+        EdgeToEdge.enable(this);
+        
+        // Asocia esta clase con su diseño visual (activity_main.xml)
+        setContentView(R.layout.activity_main);
+        
+        // Ajusta los márgenes interiores para que los elementos no queden tapados por las barras del sistema
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
+            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
+            return insets;
+        });
+
+        // -----------------------------------------------------------------------------------------
+        // 1. PREPARACIÓN DE LA LECTURA BIOMÉTRICA
+        // -----------------------------------------------------------------------------------------
+        // Executor se encarga de ejecutar las respuestas de la huella en el hilo principal de la pantalla
+        Executor executor = ContextCompat.getMainExecutor(this);
+        
+        // Creamos el lector de huella y definimos qué hacer en cada caso (éxito, error o fallo)
+        biometricPrompt = new BiometricPrompt(MainActivity.this, executor, new BiometricPrompt.AuthenticationCallback() {
+            
+            // Caso A: Ocurre un error (por ejemplo, si el usuario cancela la ventana)
+            @Override
+            public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
+                super.onAuthenticationError(errorCode, errString);
+                if (errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON || errorCode == BiometricPrompt.ERROR_USER_CANCELED) {
+                    Toast.makeText(getApplicationContext(), "Autenticación cancelada", Toast.LENGTH_SHORT).show();
+                } else if (errorCode == BiometricPrompt.ERROR_NO_BIOMETRICS) {
+                    Toast.makeText(getApplicationContext(), "No hay huellas registradas en el dispositivo", Toast.LENGTH_LONG).show();
+                } else {
+                    Toast.makeText(getApplicationContext(), "Error de autenticación: " + errString, Toast.LENGTH_SHORT).show();
+                }
+            }
+
+            // Caso B: ¡LA HUELLA FUE CORRECTA!
+            @Override
+            public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                super.onAuthenticationSucceeded(result);
+                // Muestra un mensaje flotante de éxito
+                Toast.makeText(getApplicationContext(), "¡Autenticación exitosa!", Toast.LENGTH_SHORT).show();
+                
+                // Abre la SegundaActivity (pantalla del saldo y movimientos)
+                Intent intent = new Intent(MainActivity.this, SegundaActivity.class);
+                startActivity(intent);
+            }
+
+            // Caso C: Se colocó el dedo pero la huella no coincide
+            @Override
+            public void onAuthenticationFailed() {
+                super.onAuthenticationFailed();
+                Toast.makeText(getApplicationContext(), "Huella no reconocida, intenta de nuevo", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        // -----------------------------------------------------------------------------------------
+        // 2. CONFIGURACIÓN DEL MENSAJE QUE VERÁ EL USUARIO
+        // -----------------------------------------------------------------------------------------
+        promptInfo = new BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Autenticación Biométrica") // Título principal del aviso
+                .setSubtitle("Inicia sesión usando tu huella digital o rostro") // Subtítulo explicativo
+                .setNegativeButtonText("Cancelar") // Texto para cerrar la ventana
+                .build();
+
+        // -----------------------------------------------------------------------------------------
+        // 3. VINCULAR EL BOTÓN CON LA HUELLA DIGITAL
+        // -----------------------------------------------------------------------------------------
+        // Buscamos el botón/imagen en la pantalla usando su id (imgBtn)
+        ImageView imgBtn = findViewById(R.id.imgBtn);
+        
+        // Al hacer clic en la imagen del botón de ingresar:
+        imgBtn.setOnClickListener(v -> {
+            // Revisamos si el teléfono soporta y tiene configurada la huella digital
+            BiometricManager biometricManager = BiometricManager.from(this);
+            int canAuthenticate = biometricManager.canAuthenticate(
+                    BiometricManager.Authenticators.BIOMETRIC_STRONG | BiometricManager.Authenticators.BIOMETRIC_WEAK
+            );
+
+            switch (canAuthenticate) {
+                // Si todo está bien y listo para usar
+                case BiometricManager.BIOMETRIC_SUCCESS:
+                    biometricPrompt.authenticate(promptInfo); // Muestra la ventana para poner la huella
+                    break;
+                
+                // Si el celular no tiene ninguna huella registrada en los Ajustes
+                case BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED:
+                    Toast.makeText(this, "No hay huellas registradas. Redirigiendo a Ajustes...", Toast.LENGTH_LONG).show();
+                    // Abre la pantalla de Ajustes del celular para registrar una huella
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        Intent enrollIntent = new Intent(Settings.ACTION_BIOMETRIC_ENROLL);
+                        enrollIntent.putExtra(
+                                Settings.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED,
+                                BiometricManager.Authenticators.BIOMETRIC_STRONG | BiometricManager.Authenticators.BIOMETRIC_WEAK
+                        );
+                        startActivity(enrollIntent);
+                    } else {
+                        startActivity(new Intent(Settings.ACTION_SECURITY_SETTINGS));
+                    }
+                    break;
+                
+                // Si el teléfono no tiene lector de huella
+                case BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE:
+                    Toast.makeText(this, "El dispositivo no cuenta con sensor biométrico", Toast.LENGTH_SHORT).show();
+                    break;
+                
+                // Si el lector está ocupado o no disponible
+                case BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE:
+                    Toast.makeText(this, "El sensor biométrico no está disponible actualmente", Toast.LENGTH_SHORT).show();
+                    break;
+                
+                // Cualquier otra situación
+                default:
+                    Toast.makeText(this, "La autenticación biométrica no está disponible", Toast.LENGTH_SHORT).show();
+                    break;
+            }
+        });
+    }
+}
